@@ -1681,7 +1681,7 @@ local function AddDraggingFunctionality(DragPoint, Main)
 	pcall(function()
 		local Dragging, DragInput, MousePos, FramePos = false
 		DragPoint.InputBegan:Connect(function(Input)
-			if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 				Dragging = true
 				MousePos = Input.Position
 				FramePos = Main.Position
@@ -1694,14 +1694,14 @@ local function AddDraggingFunctionality(DragPoint, Main)
 			end
 		end)
 		DragPoint.InputChanged:Connect(function(Input)
-			if Input.UserInputType == Enum.UserInputType.MouseMovement then
+			if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
 				DragInput = Input
 			end
 		end)
 		UserInputService.InputChanged:Connect(function(Input)
 			if Input == DragInput and Dragging then
 				local Delta = Input.Position - MousePos
-				TweenService:Create(Main, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position  = UDim2.new(FramePos.X.Scale,FramePos.X.Offset + Delta.X, FramePos.Y.Scale, FramePos.Y.Offset + Delta.Y)}):Play()
+				TweenService:Create(Main, TweenInfo.new(0.35, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {Position = UDim2.new(FramePos.X.Scale, FramePos.X.Offset + Delta.X, FramePos.Y.Scale, FramePos.Y.Offset + Delta.Y)}):Play()
 			end
 		end)
 	end)
@@ -2064,6 +2064,17 @@ function OrionLib:MakeWindow(WindowConfig)
 	end
 	WindowConfig.PillText = WindowConfig.PillText or "Toggle Interface"
 	WindowConfig.PillIcon = WindowConfig.PillIcon or "eye"
+	WindowConfig.PillPosition = WindowConfig.PillPosition or UDim2.new(0.5, 0, 0, 10)
+
+	-- Window size: Luna's rule. Big screens keep Orion's normal size, small screens
+	-- (phones) use Luna's mobile width/height (viewport - 100).
+	local Camera = workspace.CurrentCamera
+	local ViewSize = Camera and Camera.ViewportSize or Vector2.new(1280, 720)
+	local IsSmall = not (ViewSize.X > 774 and ViewSize.Y > 503)
+	local MainSize = IsSmall
+		and UDim2.fromOffset(math.max(ViewSize.X - 100, 320), math.max(ViewSize.Y - 100, 220))
+		or UDim2.fromOffset(615, 344)
+	local SideWidth = IsSmall and 130 or 150
 	OrionLib.Folder = WindowConfig.ConfigFolder
 	OrionLib.SaveCfg = WindowConfig.SaveConfig
 
@@ -2136,7 +2147,7 @@ function OrionLib:MakeWindow(WindowConfig)
 	})
 
 	local WindowStuff = AddThemeObject(SetChildren(SetProps(MakeElement("RoundFrame", Color3.fromRGB(255, 255, 255), 0, 10), {
-		Size = UDim2.new(0, 150, 1, -50),
+		Size = UDim2.new(0, SideWidth, 1, -50),
 		Position = UDim2.new(0, 0, 0, 50)
 	}), {
 		AddThemeObject(SetProps(MakeElement("Frame"), {
@@ -2208,8 +2219,8 @@ function OrionLib:MakeWindow(WindowConfig)
 
 	local MainWindow = AddThemeObject(SetChildren(SetProps(MakeElement("RoundFrame", Color3.fromRGB(255, 255, 255), 0, 10), {
 		Parent = Orion,
-		Position = UDim2.new(0.5, -307, 0.5, -172),
-		Size = UDim2.new(0, 615, 0, 344),
+		Position = UDim2.new(0.5, -MainSize.X.Offset / 2, 0.5, -MainSize.Y.Offset / 2),
+		Size = MainSize,
 		ClipsDescendants = true
 	}), {
 		--SetProps(MakeElement("Image", "rbxassetid://3523728077"), {
@@ -2253,9 +2264,63 @@ function OrionLib:MakeWindow(WindowConfig)
 
 	AddDraggingFunctionality(DragPoint, MainWindow)
 
+	local Pill -- created further down; only visible while the interface is closed
+	local WindowToken = 0
+	local HiddenRest, OpenTarget
+	local OpenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	local CloseInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+
+	local function ShrunkFrom(Size, Pos)
+		local w, h = Size.X.Offset, Size.Y.Offset
+		local sw, sh = w * 0.9, h * 0.9
+		return UDim2.new(0, sw, 0, sh), UDim2.new(Pos.X.Scale, Pos.X.Offset + (w - sw) / 2, Pos.Y.Scale, Pos.Y.Offset + (h - sh) / 2 + 12)
+	end
+
 	local function SetUIHidden(Hidden)
+		if Hidden == UIHidden then
+			return
+		end
 		UIHidden = Hidden
-		MainWindow.Visible = not Hidden
+		WindowToken = WindowToken + 1
+		local Token = WindowToken
+
+		if Pill then
+			Pill.Visible = Hidden
+		end
+
+		if Hidden then
+			local Size, Pos = MainWindow.Size, MainWindow.Position
+			if OpenTarget then
+				Size, Pos = OpenTarget[1], OpenTarget[2]
+				OpenTarget = nil
+			end
+			HiddenRest = {Size, Pos}
+			local SmallSize, SmallPos = ShrunkFrom(Size, Pos)
+			TweenService:Create(MainWindow, CloseInfo, {Size = SmallSize, Position = SmallPos}):Play()
+			task.delay(0.3, function()
+				if Token ~= WindowToken then
+					return
+				end
+				MainWindow.Visible = false
+				MainWindow.Size = Size
+				MainWindow.Position = Pos
+			end)
+		else
+			local Rest = HiddenRest or {MainWindow.Size, MainWindow.Position}
+			HiddenRest = nil
+			local Size, Pos = Rest[1], Rest[2]
+			local SmallSize, SmallPos = ShrunkFrom(Size, Pos)
+			MainWindow.Size = SmallSize
+			MainWindow.Position = SmallPos
+			MainWindow.Visible = true
+			OpenTarget = {Size, Pos}
+			TweenService:Create(MainWindow, OpenInfo, {Size = Size, Position = Pos}):Play()
+			task.delay(0.5, function()
+				if Token == WindowToken then
+					OpenTarget = nil
+				end
+			end)
+		end
 	end
 
 	AddConnection(CloseBtn.MouseButton1Up, function()
@@ -2276,7 +2341,7 @@ function OrionLib:MakeWindow(WindowConfig)
 
 	AddConnection(MinimizeBtn.MouseButton1Up, function()
 		if Minimized then
-			TweenService:Create(MainWindow, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = UDim2.new(0, 615, 0, 344)}):Play()
+			TweenService:Create(MainWindow, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = MainSize}):Play()
 			MinimizeBtn.Ico.Image = "rbxassetid://7072719338"
 			wait(.02)
 			MainWindow.ClipsDescendants = false
@@ -2339,15 +2404,16 @@ function OrionLib:MakeWindow(WindowConfig)
 			Name = "Interact"
 		})
 
-		local Pill = AddThemeObject(SetChildren(SetProps(MakeElement("RoundFrame", Color3.fromRGB(255, 255, 255), 1, 0), {
+		Pill = AddThemeObject(SetChildren(SetProps(MakeElement("RoundFrame", Color3.fromRGB(255, 255, 255), 1, 0), {
 			Parent = Orion,
 			Name = "Pill",
 			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, 10),
+			Position = WindowConfig.PillPosition,
 			Size = UDim2.new(0, 0, 0, 34),
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 0.15,
-			ZIndex = 5
+			ZIndex = 5,
+			Visible = UIHidden
 		}), {
 			AddThemeObject(MakeElement("Stroke"), "Stroke"),
 			SetChildren(SetProps(MakeElement("TFrame"), {
@@ -2460,8 +2526,8 @@ function OrionLib:MakeWindow(WindowConfig)
 		})
 
 		local Container = AddThemeObject(SetChildren(SetProps(MakeElement("ScrollFrame", Color3.fromRGB(255, 255, 255), 5), {
-			Size = UDim2.new(1, -150, 1, -50),
-			Position = UDim2.new(0, 150, 0, 50),
+			Size = UDim2.new(1, -SideWidth, 1, -50),
+			Position = UDim2.new(0, SideWidth, 0, 50),
 			Parent = MainWindow,
 			Visible = false,
 			Name = "ItemContainer"
